@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0 (2026-11-11)
+
+Its API on its page (plugin API 2.2, liminal-libs 1.49.0; the user: "each plugin should reflect the the API its
+attached to, and present links that provide documentation, the plugin interface should more or less contain what it
+already has, BUT, it should also expose more of what the API is about"). The feed and its headlines declare one card
+(`apis`, from `apis.py`: `MASSIVE_REST`), Massive's REST API as Massive's pages said on 2026-11-11: what it is and
+for, its address, the key's form (a bearer token), its limits (5 requests a minute per asset class on a free plan, none
+on a paid one), its plans' prices, and Massive's pages (the documentation, the REST quickstart, the knowledge base, the
+request limits, pricing, the status pages, the changelog, the API keys page, the Python client, the terms). Its 20
+parts, each asset class's sections with the WebSockets and the Flat Files, say what is used here (9) and what is not;
+its 32 calls the 14 made here, each with what for, beside the notable others. `signup` is the API keys page's address
+(a link on the Plugins view). `api_facts` says nothing (the contract's): the plugin holds no run's state. Tests: the
+card names every call its client makes and none it does not; every address on it answers (with
+`LIMINAL_VENDOR_PAGES=1`). Nothing it fetches changed. Requires liminal-libs 1.49.0.
+
 ## 0.2.0 (2026-11-03)
 
 Renamed `plugin-integrator-massive` (the package `plugin_integrator_massive`; it was `liminal-plugin-massive`) on 2026-11-03: the naming by system (plugins are `plugin-<app>-<name>`), on liminal-libs 1.4.0 (`liminal_libs`, the library renamed with it).

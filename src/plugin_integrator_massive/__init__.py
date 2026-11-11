@@ -2,12 +2,12 @@
 futures, one plan per asset class; and its headlines, a publisher in this plugin.
 
 A Liminal plugin released on its own, registered under the entry point group `liminal.providers` as
-`massive`: a class each on the class contract (plugin API 2.0, liminal_libs.sources.plugin): its feed
+`massive`: a class each on the class contract (plugin API 2.2, liminal_libs.sources.plugin): its feed
 `MassivePlugin` (a FeedPlugin: what it declares class attributes, what it does methods; the instance
 PLUGIN) and its headlines `MassiveHeadlines` (a PublisherPlugin; PUBLISHER). Its key, plans and caps
 are its own settings (MassiveSettings, from the variables the app read: the `settings` hook), reached
 with `settings.plugin("massive")`; its view of the app's settings (Settings.for_source("massive"))
-carries its plan and caps. It relies on plugin API 2.0 and nothing of the app outside the contract
+carries its plan and caps. It relies on plugin API 2.2 and nothing of the app outside the contract
 (docs/ARCHITECTURE.md in liminal: "Providers are plugins"); its version is this distribution's
 (pyproject.toml), so the classes' versions are left empty.
 
@@ -17,6 +17,12 @@ MASSIVE_TIER where you have not. The other classes' plans are not probed (PLAN_N
 Its headlines are a publisher in this plugin (PUBLISHER, part_of="massive": a section of Massive's
 page in the Plugins view, never a plugin of their own; read by the app's publications.py every 30
 minutes), on this feed's key and limits, released with it (its version and contract).
+
+What it attaches to (plugin API 2.2, `apis`: the card in apis.py, the feed's and the headlines' alike):
+Massive's REST API, its documentation and pricing pages, every part of it (each asset class's sections,
+the WebSockets, the Flat Files) said used here or not, and its calls, the ones made here first. What it
+learned of the API while it ran it does not say (api_facts, the contract's: nothing): the instance holds
+no run's state, the requests and limits of a run are its client's and the machine's ledgers'.
 
 Settings (user environment variables; the key is only ever read from the environment):
     MASSIVE_API_KEY   required for any request
@@ -41,6 +47,7 @@ from liminal_libs.freshness import Delay
 from liminal_libs.sources.publisher import Feed, Policy, PublisherPlugin
 from liminal_libs.sources.registry import (MAIN, Database, FeedPlugin, KeyVar, MachineLedger, RateLimiter, Scanned, limiter,
                                           machine_caps, minute_window)
+from .apis import APIS, KEYS
 from .client import BASE_URL, PAGE_LIMIT, MassiveClient, MassiveSource
 
 ASSETS = ("stock", "index", "fx", "crypto", "future")  # its asset classes, each on a plan of its own
@@ -129,16 +136,18 @@ def _own(settings) -> MassiveSettings:
 class MassivePlugin(FeedPlugin):
     """Massive's feed: its plans (one per asset class), its client on its own key and caps, its scan
     of the stocks plan, and its own settings (plugin API 2.0: a FeedPlugin subclass; the record it
-    was until 1.4.1 became this class, a field an attribute, a callback a method)."""
+    was until 1.4.1 became this class, a field an attribute, a callback a method); what it attaches to
+    (2.2: `apis`)."""
 
-    api = "2.0"  # the contract it is written for (the classes; its own settings; its headlines' database); its version: the distribution's
+    api = "2.2"  # the contract it is written for (the classes; its own settings; its headlines' database; its API's card); its version: the distribution's
     name = "massive"
     title = "Massive"
     about = "stocks, indices, currencies, crypto and futures: 1-second and minute bars, reference data, news"
     order = 0
     assets = frozenset(ASSETS)
     keys = (KeyVar(KEY),)
-    signup = "massive.com: your dashboard's API keys"
+    signup = KEYS  # the dashboard's API keys page (the card's console link)
+    apis = APIS  # Massive's REST API (apis.py), with its headlines'
     plan_vars = ("MASSIVE_TIER", *MASSIVE_CLASS_TIERS.values(), "MASSIVE_MAX_REQUESTS_PER_RUN",
                  "MASSIVE_MAX_REQUESTS_PER_DAY")
     plan_choices = {v: tuple(TIERS) for v in ("MASSIVE_TIER", *MASSIVE_CLASS_TIERS.values())}
@@ -255,6 +264,7 @@ class MassiveHeadlines(PublisherPlugin):
     limits, into the main database's news."""
 
     api = MassivePlugin.api  # one plugin: Massive's release and contract (its version: the distribution's)
+    apis = APIS  # the feed's card: the news endpoint among its calls, used by these headlines
     name = "massive-news"
     title = "Massive headlines"
     about = "news headlines for the News view and the globe's ticker, on Massive's key and limits"

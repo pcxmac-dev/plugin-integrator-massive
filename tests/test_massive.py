@@ -1,6 +1,6 @@
 """Massive's plugin, tested on its own: its client's requests (a fake session answers; nothing is
 sent), its settings and plans, its scan, its headlines, and that the app loads it from this package as
-its classes (plugin API 2.0: MassivePlugin, MassiveHeadlines)."""
+its classes (plugin API 2.2: MassivePlugin, MassiveHeadlines)."""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
@@ -158,25 +158,36 @@ def test_it_builds_its_client_on_its_own_key_plans_and_caps():
 
 
 # -- the app loads it from this package --------------------------------------------------------------------
+def own_version(origin: str) -> str:
+    """This distribution's version as the registry read it: its checkout's pyproject.toml when loaded from the
+    workspace's plugin directory, else the installed package's (an editable install's record keeps the version it
+    was installed at until it is installed again)."""
+    if origin.startswith("plugins/"):
+        import tomllib
+
+        return tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    return version("plugin-integrator-massive")
+
+
 def test_the_app_loads_it_and_its_headlines_from_this_package_with_its_own_version():
     registry.reload()
     p = provider("massive")
     assert p is not None, dict(registry.errors())
     assert p.origin in {"package: plugin-integrator-massive (plugin_integrator_massive)", "plugins/plugin-integrator-massive (plugin_integrator_massive)"}  # its package, or its checkout in the workspace\'s plugin directory
-    assert p.version == version("plugin-integrator-massive") and p.api == "2.0" and registry.api_refusal(p.api) is None
+    assert p.version == own_version(p.origin) and p.api == "2.2" and registry.api_refusal(p.api) is None
     assert PLUGIN.version == "" and PLUGIN.has_settings
     news = publishers()["massive-news"]
     assert (news.origin, news.version, news.api) == (p.origin, p.version, p.api)  # one plugin: released with it
     assert news.part_of == "massive" and news.account == "massive" and news.reads_itself
     assert not [why for where, why in registry.errors() if "massive" in where or "massive" in why]
     row = {r["name"]: r for r in registry.menu()}["massive"]
-    assert (row["version"], row["api"]) == (version("plugin-integrator-massive"), "2.0")
+    assert (row["version"], row["api"]) == (own_version(p.origin), "2.2")
     assert registry.plugin_feeds("massive") == ["massive"] and registry.plugin_of("massive") == "massive"
 
 
-def test_it_is_a_class_on_plugin_api_2_0_and_the_app_loads_it_as_one():
+def test_it_is_a_class_on_plugin_api_2_2_and_the_app_loads_it_as_one():
     assert isinstance(PLUGIN, MassivePlugin) and isinstance(PUBLISHER, MassiveHeadlines)
-    assert PLUGIN.api == "2.0" == PUBLISHER.api and not PLUGIN.is_record and not PUBLISHER.is_record
+    assert PLUGIN.api == "2.2" == PUBLISHER.api and not PLUGIN.is_record and not PUBLISHER.is_record
     assert PLUGIN.has_scan and PLUGIN.has_settings and PLUGIN.gives("view") and PLUGIN.gives("build")
     assert PLUGIN.gives("has_keys") and PLUGIN.gives("serves") and PLUGIN.gives("markets") and PLUGIN.gives("plan_resolutions")
     assert not PLUGIN.gives("rate") and not PLUGIN.gives("carries") and not PLUGIN.gives("reporter")  # the contract's defaults
@@ -192,7 +203,7 @@ def test_it_is_a_class_on_plugin_api_2_0_and_the_app_loads_it_as_one():
     assert freshness.DELAYS.declare(PLUGIN) is False  # declared already, the same rows: nothing changes
     # the registry loads them as the classes: a copy each (its origin and version set), the same type
     p, news = registry.providers()["massive"], registry.publishers()["massive-news"]
-    assert type(p) is MassivePlugin and type(news) is MassiveHeadlines and p is not PLUGIN and p.api == "2.0"
+    assert type(p) is MassivePlugin and type(news) is MassiveHeadlines and p is not PLUGIN and p.api == "2.2"
     assert p.has_scan and p.has_settings and news.reads_itself and p.with_(scan=None).has_scan is False and PLUGIN.has_scan
     assert repr(PLUGIN) == "<MassivePlugin 'massive': built in>" and repr(p).startswith("<MassivePlugin 'massive': ")
 
