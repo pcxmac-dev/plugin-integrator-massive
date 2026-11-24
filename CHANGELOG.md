@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1 (2026-11-24)
+
+Headlines no longer skipped after 100 new ones (the review of 2026-11-21, item 26). A read asked for one page of 100
+and followed no `next_url`, and the newest kept then jumped past whatever was left of a busy half hour. A read now
+follows the pages (`MassiveSource.news_pages`, on the API host alone, as the bar pages do) down to the newest kept,
+at most `NEWS_PAGES` (10) a read, its budget; what it stops short of, at that cap or on an error, is kept as a gap
+(`news:massive:gap`, from and to) and read, newest first, once a later read has caught up with what is new. Still
+one request a read when 100 or fewer are new. Tests: three pages followed to the end; a cap of two keeps the rest as
+a gap, read and cleared by the next read.
+
 ## 0.3.0 (2026-11-11)
 
 Its API on its page (plugin API 2.2, liminal-libs 1.49.0; the user: "each plugin should reflect the the API its

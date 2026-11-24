@@ -223,20 +223,27 @@ class MassiveSource(DataSource):
         return out
 
     def news(self, since: datetime | None = None, limit: int = 100) -> list[dict]:
+        """The newest headlines since `since`: the first page alone (one request)."""
+        return next(self.news_pages(since, limit=limit))[0]
+
+    def news_pages(self, since: datetime | None = None, until: datetime | None = None,
+                   limit: int = 100) -> Iterator[tuple[list[dict], bool]]:
+        """Headlines published in [since, until], newest first, a page at a time with whether another follows: its
+        next_url is followed (on the API host alone, as the bar pages' are) only when the next page is asked for,
+        so a reader that stops asks for nothing more (the review of 2026-11-21, item 26: one page of 100 and the
+        rest of a busy half hour was skipped)."""
         params: dict[str, Any] = {"order": "desc", "sort": "published_utc", "limit": limit}
         if since:
             params["published_utc.gte"] = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        rows = self.client.get("/v2/reference/news", params).get("results") or []
-        out = []
-        for r in rows:
-            try:
-                t = datetime.fromisoformat(r["published_utc"].replace("Z", "+00:00"))
-            except (KeyError, ValueError):
-                continue
-            out.append({"id": r.get("id"), "published_ms": int(t.timestamp() * 1000), "title": r.get("title"),
-                        "publisher": (r.get("publisher") or {}).get("name"), "url": r.get("article_url"),
-                        "tickers": r.get("tickers") or []})
-        return out
+        if until:
+            params["published_utc.lte"] = until.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        data = self.client.get("/v2/reference/news", params)
+        while True:
+            following = data.get("next_url")
+            yield _news_rows(data.get("results") or []), bool(following)
+            if not following:
+                return
+            data = self.client.get(following)
 
     def listings(self, exchange: str) -> list[dict]:
         params = {"market": "stocks", "exchange": exchange.upper(), "active": "true", "limit": 1000, "order": "asc",
@@ -293,6 +300,19 @@ class MassiveSource(DataSource):
 
 FUTURE_RESOLUTIONS = {"second": "1sec", "minute": "1min", "hour": "1hour", "day": "1session"}
 _ET = ZoneInfo("America/New_York")
+
+
+def _news_rows(rows: list[dict]) -> list[dict]:
+    out = []
+    for r in rows:
+        try:
+            t = datetime.fromisoformat(r["published_utc"].replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            continue
+        out.append({"id": r.get("id"), "published_ms": int(t.timestamp() * 1000), "title": r.get("title"),
+                    "publisher": (r.get("publisher") or {}).get("name"), "url": r.get("article_url"),
+                    "tickers": r.get("tickers") or []})
+    return out
 
 
 def normalize_future_bar(b: dict, timespan: str) -> dict:

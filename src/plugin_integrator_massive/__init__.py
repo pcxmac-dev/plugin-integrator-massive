@@ -257,6 +257,16 @@ class MassivePlugin(FeedPlugin):
 PLUGIN = MassivePlugin()
 
 NEWS_DAYS = 2  # the first read reaches this far back
+NEWS_PAGES = 10  # pages of 100 headlines a read follows at most; a longer backlog is kept as a gap for the next reads
+NEWS_GAP = "news:massive:gap"  # "from_ms,to_ms": headlines published then that are not read yet
+
+
+def _gap(kept: str | None) -> tuple[int, int] | None:
+    try:
+        lo, hi = (int(v) for v in (kept or "").split(","))
+    except ValueError:
+        return None
+    return (lo, hi) if lo <= hi else None
 
 
 class MassiveHeadlines(PublisherPlugin):
@@ -274,22 +284,53 @@ class MassiveHeadlines(PublisherPlugin):
     part_of = "massive"
     feeds = (Feed("massive-news", "Massive", "Headlines", f"{BASE_URL}/v2/reference/news", "headlines",
                   every_minutes=30, moments=False),)
-    policy = Policy(min_minutes=30, per_day=60, terms="your Massive plan's terms; one request a read",
+    policy = Policy(min_minutes=30, per_day=60,
+                    terms=f"your Massive plan's terms; one request a read, {NEWS_PAGES} at most when more is new",
                     terms_url="https://massive.com/terms")
     databases = (Database(MAIN, "Massive headlines: the news", shared=True),)  # `read` saves them there
 
     def read(self, ctx) -> int:
-        """Massive's newest headlines (one request, on Massive's limits: its rate window, daily cap and
-        kills), into the main database's news for the News view and the globe's ticker. Returns how many.
-        Never retried here: a 429 is the account's to answer (RateLimited kills it), anything else the
-        reader's to ask again on its schedule (with a budget of one, a retry only failed again)."""
+        """Massive's newest headlines (one request, more when over 100 are new; on Massive's limits: its rate
+        window, daily cap and kills), into the main database's news for the News view and the globe's ticker.
+        Returns how many. Never retried here: a 429 is the account's to answer (RateLimited kills it), anything
+        else the reader's to ask again on its schedule.
+
+        The pages are followed down to the newest kept (the review of 2026-11-21, item 26: one page of 100 was
+        read and the newest kept then jumped past the rest). At most NEWS_PAGES a read: what a read stops short
+        of, at that cap or on an error, is kept as a gap (NEWS_GAP) and read, newest first, once the next reads
+        have caught up with what is new."""
         from datetime import datetime, timedelta, timezone
 
-        source = PLUGIN.build(ctx.settings.for_source("massive"), 1, max_retries=0)
+        def at(ms):
+            return datetime.fromtimestamp(ms / 1000, timezone.utc)
+
+        source = PLUGIN.build(ctx.settings.for_source("massive"), NEWS_PAGES, max_retries=0)
         source.client.on_request = lambda n: (ctx.store.count_request("massive", now=ctx.now), ctx.count(1))
         newest = ctx.store.latest_news_ms("massive")
-        since = datetime.fromtimestamp(newest / 1000, timezone.utc) if newest else ctx.now - timedelta(days=NEWS_DAYS)
-        n = ctx.store.save_news("massive", source.news(since, 100))
+        since = at(newest) if newest else ctx.now - timedelta(days=NEWS_DAYS)
+        had = gap = _gap(ctx.store.kv_get(NEWS_GAP))
+        n, left = 0, NEWS_PAGES
+        try:
+            for page, more in source.news_pages(since):  # what is new, down to the newest kept
+                left -= 1
+                n += ctx.store.save_news("massive", page)
+                if more and page:  # were it to stop here: from the gap's start (or `since`) to the oldest read
+                    gap = (had[0] if had else int(since.timestamp() * 1000), min(r["published_ms"] for r in page))
+                elif not more:
+                    gap = had
+                if not left:
+                    break
+            if gap == had and had and left:  # caught up: the gap, newest first, with the pages left
+                for page, more in source.news_pages(at(had[0]), at(had[1])):
+                    left -= 1
+                    n += ctx.store.save_news("massive", page)
+                    oldest = min((r["published_ms"] for r in page), default=had[1])
+                    gap = (had[0], min(oldest, gap[1] - 1000)) if more else None  # a second on at least
+                    if not left:
+                        break
+        finally:
+            if gap != had:
+                ctx.store.kv_set(NEWS_GAP, f"{gap[0]},{gap[1]}" if gap else "")
         ctx.store.kv_set("news:massive", ctx.now.isoformat())  # the Fetcher's "Headlines" row reads when
         return n
 

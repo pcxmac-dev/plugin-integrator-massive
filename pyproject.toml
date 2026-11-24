@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plugin-integrator-massive"
-version = "0.3.0"  # the plugin's own release (CHANGELOG.md; on release/0.2.0 with Liminal's release); the app shows it on the Plugins view
+version = "0.3.1"  # the plugin's own release (CHANGELOG.md; on release/0.2.0 with Liminal's release); the app shows it on the Plugins view
 description = "Massive (massive.com) for Liminal: stocks, indices, currencies, crypto and futures on its API, with its headlines."
 readme = "README.md"
 requires-python = ">=3.10"

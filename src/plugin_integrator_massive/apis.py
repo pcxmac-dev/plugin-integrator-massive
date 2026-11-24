@@ -135,7 +135,8 @@ MASSIVE_REST = Api(
              used="the sessions calendar's holidays and early closes",
              docs=_rest("stocks/market-operations/market-holidays")),
         Call("GET /v2/reference/news", "the newest articles, by ticker and publication time", "News",
-             used="the headlines (massive-news): one request every 30 minutes", docs=_rest("stocks/news")),
+             used="the headlines (massive-news): one request every 30 minutes, its next pages when "
+                  "over 100 are new", docs=_rest("stocks/news")),
         Call("GET /futures/v1/aggs/{ticker}", "a futures contract's bars, from a second to a session and longer",
              "Futures", used="a contract's 1-second, minute and session bars", docs=_rest("futures/aggregates")),
         Call("GET /futures/v1/schedules", "the futures products' trading sessions, breaks and holiday changes", "Futures",

@@ -232,20 +232,69 @@ def test_its_headlines_are_read_on_its_key_once_a_read_and_counted_on_its_day(mo
     rows = [{"id": "n1", "published_ms": 1_761_000_000_000, "title": "Headline", "publisher": "Wire",
              "url": "https://x/1", "tickers": ["AAPL"]}]
     asked, built, counted, kept = [], [], [], {}
-    fake = SimpleNamespace(client=SimpleNamespace(on_request=None), news=lambda since, limit: asked.append((since, limit)) or rows)
+    fake = SimpleNamespace(client=SimpleNamespace(on_request=None),
+                           news_pages=lambda since, until=None, limit=100: asked.append((since, limit)) or iter([(rows, False)]))
     monkeypatch.setattr(massive.MassivePlugin, "build",
                         lambda self, settings, budget, max_retries=4: built.append((settings.tier.name, budget, max_retries)) or fake)
     now = datetime(2026, 10, 24, 12, tzinfo=timezone.utc)
-    store = SimpleNamespace(latest_news_ms=lambda feed: None, save_news=lambda feed, items: len(list(items)),
+    store = SimpleNamespace(latest_news_ms=lambda feed: None, save_news=lambda feed, items: len(list(items)), kv_get=kept.get,
                             kv_set=lambda k, v: kept.__setitem__(k, v),
                             count_request=lambda feed, now=None: counted.append((feed, now)))
     ctx = SimpleNamespace(settings=load_settings(env={"MASSIVE_API_KEY": "k", "MASSIVE_TIER": "starter"}, env_file=None),
                           store=store, now=now, count=lambda n: counted.append(n))
     assert massive.PUBLISHER.read(ctx) == 1
-    assert built == [("starter", 1, 0)]  # its own view of the settings, a budget of one, never retried here
+    assert built == [("starter", massive.NEWS_PAGES, 0)]  # its own view of the settings, its pages' budget, never retried here
     assert asked == [(now - timedelta(days=massive.NEWS_DAYS), 100)]  # the first read reaches two days back
     fake.client.on_request(1)
     assert counted == [("massive", now), 1] and kept == {"news:massive": now.isoformat()}
     store.latest_news_ms = lambda feed: 1_761_000_000_000  # from then on: since the newest kept
     massive.PUBLISHER.read(ctx)
     assert asked[-1] == (datetime.fromtimestamp(1_761_000_000, timezone.utc), 100)
+
+
+def _headlines(*minutes: int) -> list[dict]:
+    return [{"id": f"n{m}", "published_utc": f"2026-10-24T11:{m:02d}:00Z", "title": f"at {m}"} for m in minutes]
+
+
+def _reader(monkeypatch, responses):
+    """The headlines read on a real source over a stand-in session, into a store that keeps what it is given."""
+    src, session = _source(responses)
+    monkeypatch.setattr(massive.MassivePlugin, "build", lambda self, settings, budget, max_retries=4: src)
+    saved, kv = {}, {}
+    store = SimpleNamespace(latest_news_ms=lambda feed: max((r["published_ms"] for r in saved.values()), default=None),
+                            save_news=lambda feed, items: len([saved.__setitem__(r["id"], r) for r in items]),
+                            kv_get=kv.get, kv_set=kv.__setitem__, count_request=lambda feed, now=None: None)
+    ctx = SimpleNamespace(settings=load_settings(env={"MASSIVE_API_KEY": "k"}, env_file=None), store=store,
+                          now=datetime(2026, 10, 24, 12, tzinfo=timezone.utc), count=lambda n: None)
+    return ctx, session, saved, kv
+
+
+def test_headlines_follow_their_pages_down_to_the_newest_kept(monkeypatch):
+    """The review of 2026-11-21, item 26: one page of 100 was read, and the newest kept then jumped past the rest."""
+    more = "https://api.massive.com/v2/reference/news?cursor="
+    ctx, session, saved, kv = _reader(monkeypatch, [
+        FakeResponse(200, {"results": _headlines(59, 58), "next_url": more + "2"}),
+        FakeResponse(200, {"results": _headlines(57, 56), "next_url": more + "3"}),
+        FakeResponse(200, {"results": _headlines(55)})])
+    assert massive.PUBLISHER.read(ctx) == 5 and sorted(saved) == ["n55", "n56", "n57", "n58", "n59"]
+    assert [c[0] for c in session.calls] == ["https://api.massive.com/v2/reference/news", more + "2", more + "3"]
+    assert kv.get(massive.NEWS_GAP) is None  # nothing left unread
+
+
+def test_headlines_past_a_reads_cap_are_kept_as_a_gap_and_read_next(monkeypatch):
+    monkeypatch.setattr(massive, "NEWS_PAGES", 2)
+    more = "https://api.massive.com/v2/reference/news?cursor="
+    ctx, session, saved, kv = _reader(monkeypatch, [
+        FakeResponse(200, {"results": _headlines(59, 58), "next_url": more + "2"}),
+        FakeResponse(200, {"results": _headlines(57, 56), "next_url": more + "3"}),
+        # the next read: nothing new since 11:59, then the gap from two days back to 11:56, newest first
+        FakeResponse(200, {"results": []}),
+        FakeResponse(200, {"results": _headlines(56, 55, 54)})])
+    assert massive.PUBLISHER.read(ctx) == 4 and len(session.calls) == 2  # stopped at its cap: page 3 not asked for
+    since = int((ctx.now - timedelta(days=massive.NEWS_DAYS)).timestamp() * 1000)
+    assert kv[massive.NEWS_GAP] == f"{since},{saved['n56']['published_ms']}"
+    assert massive.PUBLISHER.read(ctx) == 3 and sorted(saved) == ["n54", "n55", "n56", "n57", "n58", "n59"]
+    assert session.calls[2][1]["published_utc.gte"] == "2026-10-24T11:59:00Z"
+    assert (session.calls[3][1]["published_utc.gte"], session.calls[3][1]["published_utc.lte"]) == (
+        "2026-10-22T12:00:00Z", "2026-10-24T11:56:00Z")
+    assert kv[massive.NEWS_GAP] == ""  # read to its end
